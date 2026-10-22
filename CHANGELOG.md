@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Intel and AMD Macs can read the CPU and GPU temperatures the System Management Controller exposes as TC and TG keys, and a GPU whose driver reports the temperature without an SMC sensor falls back to the graphics accelerator's own reading.
+- The build script takes `--arch=x86_64` to produce an Intel build; the default stays arm64.
+
+### Fixed
+- The fan control helper connects to the app on a build signed with a local self-signed identity, instead of only accepting the official team's signature.
+
 ## [3.4.2] - 2026-10-21
 
 ### Summary
