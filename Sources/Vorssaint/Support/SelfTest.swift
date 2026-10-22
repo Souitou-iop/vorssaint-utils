@@ -44,7 +44,13 @@ enum SelfTest {
         }
 
         if let smc = SMCClient() {
-            let keys = smc.keys { $0.hasPrefix("Tp") || $0.hasPrefix("Te") || $0.hasPrefix("Tg") }
+            // Intel and AMD Macs report the CPU as TC keys and the GPU as TG
+            // ones, so the Apple Silicon prefixes alone would find nothing.
+            let keys = smc.keys {
+                $0.hasPrefix("Tp") || $0.hasPrefix("Te") || $0.hasPrefix("Tg")
+                    || TemperatureSensorSelector.isX86CPUKey($0)
+                    || TemperatureSensorSelector.isX86GPUKey($0)
+            }
             if keys.isEmpty {
                 warnings.append("no SMC temperature keys")
             } else if keys.compactMap({ smc.readValue($0) }).isEmpty {
