@@ -634,6 +634,25 @@ enum MetricsFeatureTests {
                 readings: [(key, 66.3)], platform: a18Platform
             ) ?? -1, 66.3, "A18 Pro keeps a readable CPU sensor when other sensors are absent: \(key)")
         }
+        // Intel/AMD (VirtualSMC + SMCAMDProcessor on a Ryzen 9 7940HX): TC-family
+        // CPU keys, while TCGC (integrated GPU) and the TG GPU keys stay out.
+        let x86Platform = TemperatureSensorSelector.platform(brandString: "AMD Ryzen 9 7940HX with Radeon Graphics")
+        let x86Sensors: [(key: String, value: Double)] = [
+            ("TC0P", 90.7), ("TC0E", 90.7), ("TC0F", 90.7), ("TCXC", 88.0),
+            ("TCGC", 55.0), ("TG0D", 62.0), ("TB0T", 31.0),
+        ]
+        let x86CPUReadings = x86Sensors.filter {
+            TemperatureSensorSelector.isCPUTemperatureKey($0.key, platform: x86Platform)
+        }
+        suite.expect(x86CPUReadings.map(\.key) == ["TC0P", "TC0E", "TC0F", "TCXC"],
+               "Intel/AMD discovery reads the TC CPU keys and excludes the integrated GPU, GPU and battery")
+        suite.expectClose(TemperatureSensorSelector.displayedCPUTemperature(
+            readings: x86CPUReadings, platform: x86Platform
+        ) ?? -1, 90.7, "Intel/AMD shows the hottest CPU reading")
+        suite.expect(x86Sensors.filter { TemperatureSensorSelector.isX86GPUKey($0.key) }.map(\.key) == ["TG0D"],
+               "Intel/AMD GPU discovery takes TG0D and not the CPU's TCGC")
+        suite.expect(!TemperatureSensorSelector.isCPUTemperatureKey("TC0P", platform: .appleM1Family),
+               "Apple Silicon keeps its own CPU key map")
         let a18InvalidReadings: [(key: String, value: Double)] = [
             ("Tp00", 0), ("Tp01", 7), ("Te05", 125),
             ("Te0S", .nan), ("Tp05", .infinity),

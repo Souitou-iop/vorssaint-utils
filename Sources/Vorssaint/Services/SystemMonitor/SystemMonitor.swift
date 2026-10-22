@@ -865,7 +865,7 @@ final class SystemMonitor: ObservableObject {
             if plan.needGPUTemperature {
                 if take(.temperature) {
                     next.gpuTemperature = TemperatureSensorSelector.stabilizedTemperature(
-                        self.maxTemperature(of: self.gpuKeys),
+                        self.maxTemperature(of: self.gpuKeys) ?? Self.readGPUTemperature(),
                         cache: &self.gpuTemperatureCache,
                         now: now,
                         maxAge: temperatureBridge,
@@ -1022,6 +1022,7 @@ final class SystemMonitor: ObservableObject {
         let all = client.keys { name in
             TemperatureSensorSelector.isCPUTemperatureKey(name, platform: cpuTemperaturePlatform)
                 || name.hasPrefix("Tg")
+                || TemperatureSensorSelector.isX86GPUKey(name)
                 || name.range(of: "^TB[0-9]T$", options: .regularExpression) != nil
         }
         cpuKeys = all.filter {
@@ -1037,7 +1038,7 @@ final class SystemMonitor: ObservableObject {
         // core sensors with no reading at all.
         let preferredNames = Set(preferredCPUKeys.map(\.name))
         fallbackCPUKeys = cpuKeys.filter { !preferredNames.contains($0.name) }
-        gpuKeys = all.filter { $0.name.hasPrefix("Tg") }
+        gpuKeys = all.filter { $0.name.hasPrefix("Tg") || TemperatureSensorSelector.isX86GPUKey($0.name) }
         batteryKeys = all.filter { $0.name.hasPrefix("TB") }
     }
 
@@ -1141,6 +1142,17 @@ final class SystemMonitor: ObservableObject {
     /// "Device Utilization %" published by the graphics accelerator
     /// (AGXAccelerator on Apple Silicon).
     private static func readGPUUsage() -> Double? {
+        readAcceleratorStatistic("Device Utilization %").map { Double($0) / 100.0 }
+    }
+
+    /// "Temperature(C)" published by the graphics accelerator, for a GPU the
+    /// SMC has no sensor for (a discrete GPU whose driver reports it, as on
+    /// AMD/NVIDIA cards in Intel Macs and VirtualSMC machines).
+    private static func readGPUTemperature() -> Double? {
+        readAcceleratorStatistic("Temperature(C)").map { Double($0) }
+    }
+
+    private static func readAcceleratorStatistic(_ name: String) -> Int? {
         var iterator = io_iterator_t()
         guard IOServiceGetMatchingServices(kIOMainPortDefault,
                                            IOServiceMatching("IOAccelerator"),
@@ -1161,9 +1173,9 @@ final class SystemMonitor: ObservableObject {
             guard let ref = IORegistryEntryCreateCFProperty(entry, "PerformanceStatistics" as CFString,
                                                             kCFAllocatorDefault, 0),
                   let stats = ref.takeRetainedValue() as? [String: Any],
-                  let utilization = stats["Device Utilization %"] as? Int
+                  let value = stats[name] as? Int
             else { continue }
-            return Double(utilization) / 100.0
+            return value
         }
         return nil
     }

@@ -129,7 +129,22 @@ enum TemperatureSensorSelector {
     static func isCPUTemperatureKey(_ key: String,
                                     platform: CPUTemperaturePlatform) -> Bool {
         if key.hasPrefix("Tp") || key.hasPrefix("Te") { return true }
+        if platform == .generic, isX86CPUKey(key) { return true }
         return platform == .appleM3Family && key.hasPrefix("Tf")
+    }
+
+    /// Intel Macs, and Intel/AMD machines whose SMC is emulated (VirtualSMC with
+    /// SMCProcessor or SMCAMDProcessor), report the CPU as TC0P / TC0D / TC0E /
+    /// TC0F / TC0H, per-core TC1C…, and TCXC. TCGC and TCSC (integrated GPU,
+    /// system agent) share the prefix but are not the CPU.
+    static func isX86CPUKey(_ key: String) -> Bool {
+        key.range(of: "^TC[0-9X][A-Za-z]$", options: .regularExpression) != nil
+    }
+
+    /// The discrete or integrated GPU on Intel Macs and VirtualSMC machines:
+    /// TG0D (die), TG0P (proximity), TGDD.
+    static func isX86GPUKey(_ key: String) -> Bool {
+        key.range(of: "^TG[0-9D][A-Za-z]$", options: .regularExpression) != nil
     }
 
     static func stabilizedTemperature(_ reading: Double?,
