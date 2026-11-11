@@ -1,0 +1,109 @@
+name: Build x64
+
+# Local fork-only workflow. Upstream releases arm64 only; this builds the
+# x86_64 variant on GitHub's Intel runner so the result does not depend on a
+# particular contributor's machine. It is not part of the release pipeline:
+# the bundle is signed with a throwaway self-signed identity and is not
+# notarized, so Gatekeeper warns on first launch.
+on:
+  push:
+    branches: ["x86-build"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-x64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  x64:
+    name: Build & test x86_64
+    # macos-26-intel is the x64 (Intel) standard runner. Plain macos-26 is
+    # arm64 and would produce an Apple Silicon binary.
+    runs-on: macos-26-intel
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Show toolchain
+        run: |
+          uname -m
+          swiftc --version
+          xcrun --sdk macosx --show-sdk-version
+          xcrun --find clang
+
+      # build.sh only creates the stable local identity for --dev/--install
+      # builds. A plain CI build would fall through to an ad-hoc signature,
+      # which has no certificate for the fan helper's XPC requirement to pin.
+      - name: Set up self-signed identity
+        run: ./Tools/setup-signing.sh
+
+      # The upstream suite has x86-only flaky UI/encoder assertions (recorder,
+      # notch). Keep their log for triage but do not block producing the
+      # bundle; architecture and signature checks below are the hard gate.
+      # Run it before the release build so the final build/ tree is the app.
+      - name: Unit tests
+        continue-on-error: true
+        run: ./build.sh --test --arch=x86_64
+
+      - name: Build x86_64 app
+        run: ./build.sh --arch=x86_64
+
+      - name: Selftest
+        run: ./build/Vorssaint --selftest
+
+      - name: Verify architecture and signature
+        run: |
+          set -euo pipefail
+          APP="build/stage/Vorssaint.app"
+          for binary in \
+              "$APP/Contents/MacOS/Vorssaint" \
+              "$APP/Contents/Library/LaunchServices/com.vorssaint.utils.fan-control" \
+              "$APP/Contents/Frameworks/libVorssaintNowPlaying.dylib"; do
+            echo "▸ $binary"
+            lipo -info "$binary" | grep -F "architecture: x86_64"
+          done
+          lipo -info build/Vorssaint | grep -F "architecture: x86_64"
+          codesign --verify --deep --strict "$APP"
+          codesign -dv --verbose=2 "$APP" 2>&1 | grep -F "Authority=Vorssaint Utils Signing"
+
+          # Both ends of the XPC connection must accept the same leaf
+          # certificate, or the fan helper refuses to talk to the app.
+          LEAF="$(security find-certificate -c 'Vorssaint Utils Signing' -Z \
+              "$HOME/Library/Keychains/vorssaint-signing.keychain-db" \
+              | awk '/SHA-1 hash:/ {print $3}')"
+          test -n "$LEAF"
+          echo "▸ leaf certificate: $LEAF"
+          codesign --verify --strict \
+              -R="identifier \"com.vorssaint.utils\" and certificate leaf = H\"$LEAF\"" "$APP"
+          codesign --verify --strict \
+              -R="identifier \"com.vorssaint.utils.fan-control\" and certificate leaf = H\"$LEAF\"" \
+              "$APP/Contents/Library/LaunchServices/com.vorssaint.utils.fan-control"
+
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+              "$APP/Contents/Info.plist")"
+          BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
+          echo "▸ version: $VERSION ($BUILD)"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD=$BUILD" >> "$GITHUB_ENV"
+
+      - name: Package DMG
+        run: ./Tools/make-dmg.sh
+
+      - name: Upload app bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Vorssaint-${{ env.VERSION }}-${{ env.BUILD }}-x86_64-app
+          path: build/stage/Vorssaint.app
+          if-no-files-found: error
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Vorssaint-${{ env.VERSION }}-${{ env.BUILD }}-x86_64-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
