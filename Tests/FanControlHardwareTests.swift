@@ -26,6 +26,9 @@ enum FanControlHardwareContract {
         static func isCPUTemperatureKey(_ name: String, platform: CPUTemperaturePlatform) -> Bool {
             name.hasPrefix("TC")
         }
+        static func isX86GPUKey(_ name: String) -> Bool {
+            name.range(of: "^TG[0-9D][A-Za-z]$", options: .regularExpression) != nil
+        }
     }
 
     struct Write {
